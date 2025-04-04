@@ -21,16 +21,35 @@ except ImportError:
     plot_enabled = False
 
 
-ALLOWED_ERROR = 0.01
-MAX_GROUP_STD = 0.025
-VERSION = '0.6.2'
+ALLOWED_ERROR = 0.01  # 允许的误差范围（秒）
+MAX_GROUP_STD = 0.025  # 组内偏移的最大标准差
+VERSION = '0.6.2'  # 软件版本号
 
 
 def abs_diff(a, b):
+    """
+    计算两个数的绝对差值
+    
+    参数:
+        a, b: 要比较的两个数值
+        
+    返回:
+        两个数的绝对差值
+    """
     return abs(a - b)
 
 
 def interpolate_nones(data, points):
+    """
+    对数据中的 None 值进行插值
+    
+    参数:
+        data: 包含可能有 None 值的数据列表
+        points: 与数据对应的坐标点
+        
+    返回:
+        插值后的数据列表，所有 None 值被替换为插值结果
+    """
     data = ensure_static_collection(data)
     values_lookup = {p: v for p, v in zip(points, data) if v is not None}
     if not values_lookup:
@@ -55,8 +74,20 @@ def interpolate_nones(data, points):
     ]
 
 
-# todo: implement this as a running median
 def running_median(values, window_size):
+    """
+    计算滑动窗口中值滤波
+    
+    参数:
+        values: 输入值列表
+        window_size: 中值滤波窗口大小，必须为奇数
+        
+    返回:
+        应用中值滤波后的列表
+    
+    异常:
+        SushiError: 当窗口大小不是奇数时抛出
+    """
     if window_size % 2 != 1:
         raise SushiError('Median window size should be odd')
     half_window = window_size // 2
@@ -70,6 +101,13 @@ def running_median(values, window_size):
 
 
 def smooth_events(events, radius):
+    """
+    对事件的时间偏移进行平滑处理
+    
+    参数:
+        events: 要平滑的事件列表
+        radius: 平滑窗口的半径，窗口大小为 2*radius+1
+    """
     if not radius:
         return
     window_size = radius * 2 + 1
@@ -80,6 +118,15 @@ def smooth_events(events, radius):
 
 
 def detect_groups(events_iter):
+    """
+    根据时间偏移将事件划分为组
+    
+    参数:
+        events_iter: 事件的迭代器
+        
+    返回:
+        list: 组列表，每个组是事件的列表
+    """
     events_iter = iter(events_iter)
     groups_list = [[next(events_iter)]]
     for event in events_iter:
@@ -90,9 +137,19 @@ def detect_groups(events_iter):
 
 
 def groups_from_chapters(events, times):
+    """
+    根据章节时间点将事件划分为组
+    
+    参数:
+        events: 事件列表
+        times: 章节开始时间的列表
+        
+    返回:
+        list: 按章节划分的事件组列表
+    """
     logging.info('Chapter start points: {0}'.format([format_time(t) for t in times]))
     groups = [[]]
-    chapter_times = iter(times[1:] + [36000000000])  # very large event at the end
+    chapter_times = iter(times[1:] + [36000000000])  # 添加一个非常大的结束时间
     current_chapter = next(chapter_times)
 
     for event in events:
@@ -103,9 +160,8 @@ def groups_from_chapters(events, times):
 
         groups[-1].append(event)
 
-    groups = [g for g in groups if g]  # non-empty groups
-    # check if we have any groups where every event is linked
-    # for example a chapter with only comments inside
+    groups = [g for g in groups if g]  # 过滤掉空组
+    # 检查是否有只包含链接事件的组（例如只有注释的章节）
     broken_groups = [group for group in groups if not any(e for e in group if not e.linked)]
     if broken_groups:
         for group in broken_groups:
@@ -115,8 +171,7 @@ def groups_from_chapters(events, times):
                 parent_group.append(event)
             del group[:]
         groups = [g for g in groups if g]
-        # re-sort the groups again since we might break the order when inserting linked events
-        # sorting everything again is far from optimal but python sorting is very fast for sorted arrays anyway
+        # 重新排序，因为添加链接事件可能打乱顺序
         for group in groups:
             group.sort(key=lambda event: event.start)
 
@@ -124,6 +179,15 @@ def groups_from_chapters(events, times):
 
 
 def split_broken_groups(groups):
+    """
+    分割可能被错误分组的事件组
+    
+    参数:
+        groups: 事件组列表
+        
+    返回:
+        list: 修正后的事件组列表
+    """
     correct_groups = []
     broken_found = False
     for g in groups:
@@ -151,7 +215,10 @@ def split_broken_groups(groups):
 
 def fix_near_borders(events):
     """
-    We assume that all lines with diff greater than 5 * (median diff across all events) are broken
+    修复靠近边界的事件，假设所有差异大于 5 倍中位差的行都是有问题的
+    
+    参数:
+        events: 事件列表
     """
     def fix_border(event_list, median_diff):
         last_ten_diff = np.median([x.diff for x in event_list[:10]], overwrite_input=True)
@@ -178,6 +245,16 @@ def fix_near_borders(events):
 
 
 def get_distance_to_closest_kf(timestamp, keyframes):
+    """
+    计算时间戳到最近关键帧的距离
+    
+    参数:
+        timestamp: 时间戳（秒）
+        keyframes: 关键帧时间点列表
+        
+    返回:
+        float: 到最近关键帧的距离（秒）
+    """
     idx = bisect.bisect_left(keyframes, timestamp)
     if idx == 0:
         kf = keyframes[0]
@@ -191,6 +268,20 @@ def get_distance_to_closest_kf(timestamp, keyframes):
 
 
 def find_keyframe_shift(group, src_keytimes, dst_keytimes, src_timecodes, dst_timecodes, max_kf_distance):
+    """
+    计算关键帧之间的偏移
+    
+    参数:
+        group: 事件组
+        src_keytimes: 源视频关键帧时间点
+        dst_keytimes: 目标视频关键帧时间点
+        src_timecodes: 源视频时间码
+        dst_timecodes: 目标视频时间码
+        max_kf_distance: 最大关键帧距离
+        
+    返回:
+        tuple: (开始偏移, 结束偏移)
+    """
     def get_distance(src_distance, dst_distance, limit):
         if abs(dst_distance) > limit:
             return None
@@ -211,6 +302,19 @@ def find_keyframe_shift(group, src_keytimes, dst_keytimes, src_timecodes, dst_ti
 
 
 def find_keyframes_distances(event, src_keytimes, dst_keytimes, timecodes, max_kf_distance):
+    """
+    计算单个事件开始和结束时间与关键帧的距离
+    
+    参数:
+        event: 要处理的事件
+        src_keytimes: 源视频关键帧时间点
+        dst_keytimes: 目标视频关键帧时间点
+        timecodes: 时间码
+        max_kf_distance: 最大关键帧距离
+        
+    返回:
+        tuple: (开始时间偏移, 结束时间偏移)
+    """
     def find_keyframe_distance(src_time, dst_time):
         src = get_distance_to_closest_kf(src_time, src_keytimes)
         dst = get_distance_to_closest_kf(dst_time, dst_keytimes)
@@ -227,13 +331,28 @@ def find_keyframes_distances(event, src_keytimes, dst_keytimes, timecodes, max_k
 
 def snap_groups_to_keyframes(events, chapter_times, max_ts_duration, max_ts_distance, src_keytimes, dst_keytimes,
                              src_timecodes, dst_timecodes, max_kf_distance, kf_mode):
+    """
+    将事件组吸附到关键帧
+    
+    参数:
+        events: 事件列表
+        chapter_times: 章节时间点
+        max_ts_duration: 最大排版持续时间
+        max_ts_distance: 最大排版距离
+        src_keytimes: 源视频关键帧时间点
+        dst_keytimes: 目标视频关键帧时间点
+        src_timecodes: 源视频时间码
+        dst_timecodes: 目标视频时间码
+        max_kf_distance: 最大关键帧距离
+        kf_mode: 关键帧模式（'all', 'shift', 'snap'）
+    """
     if not max_kf_distance:
         return
 
     groups = merge_short_lines_into_groups(events, chapter_times, max_ts_duration, max_ts_distance)
 
     if kf_mode == 'all' or kf_mode == 'shift':
-        #  step 1: snap events without changing their duration. Useful for some slight audio imprecision correction
+        #  步骤 1: 不改变事件持续时间的情况下吸附事件。用于修正轻微的音频不精确
         shifts = []
         times = []
         for group in groups:
@@ -258,10 +377,10 @@ def snap_groups_to_keyframes(events, chapter_times, max_ts_duration, max_ts_dist
                         e.adjust_additional_shifts(start_shift, end_shift)
 
     if kf_mode == 'all' or kf_mode == 'snap':
-        # step 2: snap start/end times separately
+        # 步骤 2: 分别吸附开始和结束时间
         for group in groups:
             if len(group) > 1:
-                pass  # we don't snap typesetting
+                pass  # 不吸附排版组
             start_shift, end_shift = find_keyframes_distances(group[0], src_keytimes, dst_keytimes, src_timecodes, max_kf_distance)
             if abs(start_shift) > 0.01 or abs(end_shift) > 0.01:
                 logging.info('Snapping {0} to keyframes, start time by {1}, end: {2}'.format(format_time(group[0].start), start_shift, end_shift))
@@ -269,6 +388,15 @@ def snap_groups_to_keyframes(events, chapter_times, max_ts_duration, max_ts_dist
 
 
 def average_shifts(events):
+    """
+    计算事件偏移的加权平均值
+    
+    参数:
+        events: 事件列表
+        
+    返回:
+        float: 平均偏移值
+    """
     events = [e for e in events if not e.linked]
     shifts = [x.shift for x in events]
     weights = [1 - x.diff for x in events]
@@ -279,6 +407,18 @@ def average_shifts(events):
 
 
 def merge_short_lines_into_groups(events, chapter_times, max_ts_duration, max_ts_distance):
+    """
+    将短行合并成组（用于排版和关键帧吸附）
+    
+    参数:
+        events: 事件列表
+        chapter_times: 章节时间点
+        max_ts_duration: 最大排版持续时间
+        max_ts_distance: 最大排版距离
+        
+    返回:
+        list: 分组后的事件列表
+    """
     search_groups = []
     chapter_times = iter(chapter_times[1:] + [100000000])
     next_chapter = next(chapter_times)
@@ -312,6 +452,19 @@ def merge_short_lines_into_groups(events, chapter_times, max_ts_duration, max_ts
 
 
 def prepare_search_groups(events, source_duration, chapter_times, max_ts_duration, max_ts_distance):
+    """
+    准备用于音频搜索的组
+    
+    参数:
+        events: 事件列表
+        source_duration: 源音频持续时间
+        chapter_times: 章节时间点
+        max_ts_duration: 最大排版持续时间
+        max_ts_distance: 最大排版距离
+        
+    返回:
+        list: 分组后的事件列表
+    """
     last_unlinked = None
     for idx, event in enumerate(events):
         if event.is_comment:
@@ -332,8 +485,8 @@ def prepare_search_groups(events, source_duration, chapter_times, max_ts_duratio
                 event.link_event(last_unlinked)
             continue
 
-        # link lines with start and end times identical to some other event
-        # assuming scripts are sorted by start time so we don't search the entire collection
+        # 链接开始和结束时间与其他事件相同的行
+        # 假设脚本按开始时间排序，因此不需要搜索整个集合
         def same_start(x):
             return event.start == x.start
         processed = next((x for x in takewhile(same_start, reversed(events[:idx])) if not x.linked and x.end == event.end), None)
@@ -346,7 +499,7 @@ def prepare_search_groups(events, source_duration, chapter_times, max_ts_duratio
 
     search_groups = merge_short_lines_into_groups(events, chapter_times, max_ts_duration, max_ts_distance)
 
-    # link groups contained inside other groups to the larger group
+    # 将包含在其他组内的组链接到更大的组
     passed_groups = []
     for idx, group in enumerate(search_groups):
         try:
@@ -361,6 +514,19 @@ def prepare_search_groups(events, source_duration, chapter_times, max_ts_duratio
 
 
 def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_window, rewind_thresh):
+    """
+    计算每个事件组的时间偏移
+    
+    这是 Sushi 的核心算法，通过音频比较计算字幕时间偏移
+    
+    参数:
+        src_stream: 源音频流
+        dst_stream: 目标音频流
+        groups_list: 事件组列表
+        normal_window: 正常搜索窗口大小
+        max_window: 最大搜索窗口大小
+        rewind_thresh: 重新尝试前的连续错误阈值
+    """
     def log_shift(state):
         logging.info('{0}-{1}: shift: {2:0.10f}, diff: {3:0.10f}'
                      .format(format_time(state["start_time"]), format_time(state["end_time"]), state["shift"], state["diff"]))
@@ -370,10 +536,10 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
                       .format(format_time(state["start_time"]), format_time(state["end_time"]),
                               shift, left_side_shift, right_side_shift, search_offset))
 
-    small_window = 1.5
+    small_window = 1.5  # 小窗口大小，用于快速匹配
     idx = 0
-    committed_states = []
-    uncommitted_states = []
+    committed_states = []  # 已确认的状态
+    uncommitted_states = []  # 未确认的状态
     window = normal_window
     while idx < len(groups_list):
         search_group = groups_list[idx]
@@ -385,7 +551,7 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
 
         if not uncommitted_states:
             if original_time + last_committed_shift > dst_stream.duration_seconds:
-                # event outside of audio range, all events past it are also guaranteed to fail
+                # 事件超出音频范围，后面的事件也会失败
                 for g in groups_list[idx:]:
                     committed_states.append({"start_time": g[0].start, "end_time": g[-1].end, "shift": None, "diff": None})
                     logging.info("{0}-{1}: outside of audio range".format(format_time(g[0].start), format_time(g[-1].end)))
@@ -395,7 +561,7 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
                 diff, new_time = dst_stream.find_substream(tv_audio, original_time + last_committed_shift, small_window)
 
             if new_time is not None and abs_diff(new_time - original_time, last_committed_shift) <= ALLOWED_ERROR:
-                # fastest case - small window worked, commit the group immediately
+                # 最快的情况 - 小窗口有效，立即提交组
                 group_state.update({"shift": new_time - original_time, "diff": diff})
                 committed_states.append(group_state)
                 log_shift(group_state)
@@ -405,10 +571,11 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
                 idx += 1
                 continue
 
+        # 将音频分成左右两半进行搜索，提高匹配精度
         left_audio_half, right_audio_half = np.split(tv_audio, [len(tv_audio[0]) // 2], axis=1)
         right_half_offset = len(left_audio_half[0]) / float(src_stream.sample_rate)
         terminate = False
-        # searching from last committed shift
+        # 从上次确认的偏移开始搜索
         if original_time + last_committed_shift < dst_stream.duration_seconds:
             diff, new_time = dst_stream.find_substream(tv_audio, original_time + last_committed_shift, window)
             left_side_time = dst_stream.find_substream(left_audio_half, original_time + last_committed_shift, window)[1]
@@ -417,6 +584,7 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
             log_uncommitted(group_state, new_time - original_time, left_side_time - original_time,
                             right_side_time - original_time, last_committed_shift)
 
+        # 从上一个未确认状态的偏移开始再次尝试搜索
         if not terminate and uncommitted_states and uncommitted_states[-1]["shift"] is not None \
                 and original_time + uncommitted_states[-1]["shift"] < dst_stream.duration_seconds:
             start_offset = uncommitted_states[-1]["shift"]
@@ -427,9 +595,14 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
             log_uncommitted(group_state, new_time - original_time, left_side_time - original_time,
                             right_side_time - original_time, start_offset)
 
-        shift = new_time - original_time
+        if new_time is not None:
+            shift = new_time - original_time
+        else:
+            shift = -1000000
+            diff = 0.00001
+            
         if not terminate:
-            # we aren't back on track yet - add this group to uncommitted
+            # 我们还没有回到正轨 - 将此组添加到未确认中
             group_state.update({"shift": shift, "diff": diff})
             uncommitted_states.append(group_state)
             idx += 1
@@ -441,7 +614,7 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
                 del uncommitted_states[:]
             continue
 
-        # we're back on track - apply current shift to all broken events
+        # 我们回到正轨了 - 将当前偏移应用到所有破损事件
         if uncommitted_states:
             logging.warning("Events from {0} to {1} will most likely be broken!".format(
                 format_time(uncommitted_states[0]["start_time"]),
@@ -455,11 +628,14 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
         del uncommitted_states[:]
         idx += 1
 
+    # 记录所有未确认状态
     for state in uncommitted_states:
         log_shift(state)
 
+    # 设置每个组的偏移
     for idx, (search_group, group_state) in enumerate(zip(groups_list, chain(committed_states, uncommitted_states))):
         if group_state["shift"] is None:
+            # 链接到前面有效的事件
             for group in reversed(groups_list[:idx]):
                 link_to = next((x for x in reversed(group) if not x.linked), None)
                 if link_to:
@@ -472,11 +648,32 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
 
 
 def check_file_exists(path, file_title):
+    """
+    检查文件是否存在
+    
+    参数:
+        path: 文件路径
+        file_title: 文件标题（用于错误消息）
+        
+    异常:
+        SushiError: 当文件不存在时抛出
+    """
     if path and not os.path.exists(path):
         raise SushiError("{0} file doesn't exist".format(file_title))
 
 
 def format_full_path(temp_dir, base_path, postfix):
+    """
+    格式化完整文件路径
+    
+    参数:
+        temp_dir: 临时目录
+        base_path: 基础路径
+        postfix: 后缀
+        
+    返回:
+        str: 格式化后的完整路径
+    """
     if temp_dir:
         return os.path.join(temp_dir, os.path.basename(base_path) + postfix)
     else:
@@ -484,11 +681,25 @@ def format_full_path(temp_dir, base_path, postfix):
 
 
 def create_directory_if_not_exists(path):
+    """
+    如果目录不存在则创建
+    
+    参数:
+        path: 目录路径
+    """
     if path and not os.path.exists(path):
         os.makedirs(path)
 
 
 def run(args):
+    """
+    主程序入口
+    
+    处理命令行参数，运行字幕同步流程
+    
+    参数:
+        args: 命令行参数对象
+    """
     ignore_chapters = args.chapters_file is not None and args.chapters_file.lower() == 'none'
     write_plot = plot_enabled and args.plot_path
     if write_plot:
@@ -496,7 +707,7 @@ def run(args):
         plt.ylabel('Shift, seconds')
         plt.xlabel('Event index')
 
-    # first part should do all possible validation and should NOT take significant amount of time
+    # 第一部分应该进行所有可能的验证，不应该花费大量时间
     check_file_exists(args.source, 'Source')
     check_file_exists(args.destination, 'Destination')
     check_file_exists(args.src_timecodes, 'Source timecodes')
@@ -524,21 +735,21 @@ def run(args):
 
     create_directory_if_not_exists(args.temp_dir)
 
-    # selecting source audio
+    # 选择源音频
     if src_demuxer.is_wav:
         src_audio_path = args.source
     else:
         src_audio_path = format_full_path(args.temp_dir, args.source, '.sushi.wav')
         src_demuxer.set_audio(stream_idx=args.src_audio_idx, output_path=src_audio_path, sample_rate=args.sample_rate)
 
-    # selecting destination audio
+    # 选择目标音频
     if dst_demuxer.is_wav:
         dst_audio_path = args.destination
     else:
         dst_audio_path = format_full_path(args.temp_dir, args.destination, '.sushi.wav')
         dst_demuxer.set_audio(stream_idx=args.dst_audio_idx, output_path=dst_audio_path, sample_rate=args.sample_rate)
 
-    # selecting source subtitles
+    # 选择源字幕
     if args.script_file:
         src_script_path = args.script_file
     else:
@@ -550,7 +761,7 @@ def run(args):
     if script_extension not in ('.ass', '.srt'):
         raise SushiError('Unknown script type')
 
-    # selection destination subtitles
+    # 选择目标字幕
     if args.output_script:
         dst_script_path = args.output_script
         dst_script_extension = get_extension(args.output_script)
@@ -560,7 +771,7 @@ def run(args):
     else:
         dst_script_path = format_full_path(args.temp_dir, args.destination, '.sushi' + script_extension)
 
-    # selecting chapters
+    # 选择章节
     if args.grouping and not ignore_chapters:
         if args.chapters_file:
             if get_extension(args.chapters_file) == '.xml':
@@ -576,7 +787,7 @@ def run(args):
     else:
         chapter_times = []
 
-    # selecting keyframes and timecodes
+    # 选择关键帧和时间码
     if args.src_keyframes:
         def select_keyframes(file_arg, demuxer):
             auto_file = format_full_path(args.temp_dir, demuxer.path, '.sushi.keyframes.txt')
@@ -607,8 +818,8 @@ def run(args):
         src_timecodes_file = select_timecodes(args.src_timecodes, args.src_fps, src_demuxer)
         dst_timecodes_file = select_timecodes(args.dst_timecodes, args.dst_fps, dst_demuxer)
 
-    # after this point nothing should fail so it's safe to start slow operations
-    # like running the actual demuxing
+    # 此时不应该再有任何失败，可以安全地开始耗时操作
+    # 如运行实际的分离
     src_demuxer.demux()
     dst_demuxer.demux()
 
@@ -620,18 +831,22 @@ def run(args):
             dst_timecodes = Timecodes.cfr(args.dst_fps) if args.dst_fps else Timecodes.from_file(dst_timecodes_file)
             dst_keytimes = [dst_timecodes.get_frame_time(f) for f in keyframes.parse_keyframes(dst_keyframes_file)]
 
+        # 加载字幕文件
         script = AssScript.from_file(src_script_path) if script_extension == '.ass' else SrtScript.from_file(src_script_path)
         script.sort_by_time()
 
+        # 加载音频流
         src_stream = WavStream(src_audio_path, sample_rate=args.sample_rate, sample_type=args.sample_type)
         dst_stream = WavStream(dst_audio_path, sample_rate=args.sample_rate, sample_type=args.sample_type)
 
+        # 准备搜索组
         search_groups = prepare_search_groups(script.events,
                                               source_duration=src_stream.duration_seconds,
                                               chapter_times=chapter_times,
                                               max_ts_duration=args.max_ts_duration,
                                               max_ts_distance=args.max_ts_distance)
 
+        # 计算时间偏移
         calculate_shifts(src_stream, dst_stream, search_groups,
                          normal_window=args.window,
                          max_window=args.max_window,
@@ -642,6 +857,7 @@ def run(args):
         if write_plot:
             plt.plot([x.shift for x in events], label='From audio')
 
+        # 根据分组设置处理事件
         if args.grouping:
             if not ignore_chapters and chapter_times:
                 groups = groups_from_chapters(events, chapter_times)
@@ -657,6 +873,7 @@ def run(args):
             if write_plot:
                 plt.plot([x.shift for x in events], label='Borders fixed')
 
+            # 记录每个组的偏移信息
             for g in groups:
                 start_shift = g[0].shift
                 end_shift = g[-1].shift
@@ -666,6 +883,7 @@ def run(args):
                              .format(format_time(g[0].start), format_time(g[-1].end), len(g), start_shift, end_shift,
                                      avg_shift))
 
+            # 处理关键帧
             if args.src_keyframes:
                 for e in (x for x in events if x.linked):
                     e.resolve_link()
@@ -677,23 +895,27 @@ def run(args):
             if write_plot:
                 plt.plot([x.shift for x in events], label='Borders fixed')
 
+            # 处理关键帧
             if args.src_keyframes:
                 for e in (x for x in events if x.linked):
                     e.resolve_link()
                 snap_groups_to_keyframes(events, chapter_times, args.max_ts_duration, args.max_ts_distance, src_keytimes,
                                          dst_keytimes, src_timecodes, dst_timecodes, args.max_kf_distance, args.kf_mode)
 
+        # 应用偏移并保存结果
         for event in events:
             event.apply_shift()
 
         script.save_to_file(dst_script_path)
 
+        # 绘制结果图表
         if write_plot:
             plt.plot([x.shift + (x._start_shift + x._end_shift) / 2.0 for x in events], label='After correction')
             plt.legend(fontsize=5, frameon=False, fancybox=False)
             plt.savefig(args.plot_path, dpi=300)
 
     finally:
+        # 清理临时文件
         if args.cleanup:
             src_demuxer.cleanup()
             dst_demuxer.cleanup()
