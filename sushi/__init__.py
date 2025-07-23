@@ -400,7 +400,10 @@ def average_shifts(events):
     events = [e for e in events if not e.linked]
     shifts = [x.shift for x in events]
     weights = [1 - x.diff for x in events]
-    avg = np.average(shifts, weights=weights)
+    if shifts != [] or weights != []:
+        avg = np.average(shifts, weights=weights)
+    else:
+        avg = [0]
     for e in events:
         e.set_shift(avg, e.diff)
     return avg
