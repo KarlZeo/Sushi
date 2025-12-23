@@ -97,7 +97,7 @@ class DownmixedWavFile(object):
         # 根据采样宽度解析字节数据
         if self.sample_width == 2:
             # 16位采样
-            unpacked = np.fromstring(data, dtype=np.int16)
+            unpacked = np.frombuffer(data, dtype=np.int16)
         elif self.sample_width == 3:
             # 24位采样，需要特殊处理
             raw_bytes = np.ndarray(len(data), 'int8', data)
