@@ -531,13 +531,13 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
         rewind_thresh: 重新尝试前的连续错误阈值
     """
     def log_shift(state):
-        logging.info('{0}-{1}: shift: {2:0.10f}, diff: {3:0.10f}'
-                     .format(format_time(state["start_time"]), format_time(state["end_time"]), state["shift"], state["diff"]))
+        logging.info('{0}-{1}: shift: {2:0.10f}, diff: {3:0.10f}, text1: {4}'
+                     .format(format_time(state["start_time"]), format_time(state["end_time"]), state["shift"], state["diff"], state["text"]))
 
     def log_uncommitted(state, shift, left_side_shift, right_side_shift, search_offset):
-        logging.debug('{0}-{1}: shift: {2:0.5f} [{3:0.5f}, {4:0.5f}], search offset: {5:0.6f}'
+        logging.debug('{0}-{1}: shift: {2:0.5f} [{3:0.5f}, {4:0.5f}], search offset: {5:0.6f}, , text2: {6}'
                       .format(format_time(state["start_time"]), format_time(state["end_time"]),
-                              shift, left_side_shift, right_side_shift, search_offset))
+                              shift, left_side_shift, right_side_shift, search_offset, state["text"]))
 
     small_window = 1.5  # 小窗口大小，用于快速匹配
     idx = 0
@@ -548,7 +548,7 @@ def calculate_shifts(src_stream, dst_stream, groups_list, normal_window, max_win
         search_group = groups_list[idx]
         tv_audio = src_stream.get_substream(search_group[0].start, search_group[-1].end)
         original_time = search_group[0].start
-        group_state = {"start_time": search_group[0].start, "end_time": search_group[-1].end, "shift": None, "diff": None}
+        group_state = {"start_time": search_group[0].start, "end_time": search_group[-1].end, "shift": None, "diff": None, "text": search_group[0].text}
         last_committed_shift = committed_states[-1]["shift"] if committed_states else 0
         diff = new_time = None
 
